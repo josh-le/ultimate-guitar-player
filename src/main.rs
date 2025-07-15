@@ -14,11 +14,24 @@ use std::{
     error::Error,
     io::{self, Write},
 };
+use scraper::{Html, Selector};
+
+struct Chord {
+    name: String,
+    // Add more fields like position or timing later
+}
+
+struct Song {
+    title: Option<String>,
+    artist: Option<String>,
+    chords: Vec<Chord>,
+}
 
 struct App {
     input_mode: bool,
     url: String,
     message: String,
+    song: Option<Song>,
 }
 
 impl App {
@@ -27,6 +40,7 @@ impl App {
             input_mode: false,
             url: String::new(),
             message: String::new(),
+            song: None,
         }
     }
 }
@@ -59,6 +73,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn parse_html(html: &str) -> Song {
+    let document = Html::parse_document(html);
+
+    // Extract title
+    let title_selector = Selector::parse("title").unwrap();
+    let title = document.select(&title_selector).next().map(|t| t.inner_html());
+
+    // Extract artist (assuming from meta or h1, adjust selector as needed)
+    let artist_selector = Selector::parse("meta[name='og:site_name']").unwrap(); // Placeholder, may need better selector
+    let artist = document.select(&artist_selector).next().and_then(|a| a.value().attr("content")).map(String::from);
+
+    // Extract chords
+    let chord_selector = Selector::parse("span.yvpjZ").unwrap();
+    let chords: Vec<Chord> = document.select(&chord_selector).map(|el| Chord { name: el.inner_html() }).collect();
+
+    Song {
+        title,
+        artist,
+        chords,
+    }
+}
+
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     loop {
         terminal.draw(|f| ui(f, &app))?;
@@ -78,7 +114,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                                 Ok(text) => {
                                                     if let Ok(mut file) = std::fs::File::create("fetched.html") {
                                                         if file.write_all(text.as_bytes()).is_ok() {
-                                                            app.message = "Saved to fetched.html".to_string();
+                                                            let song = parse_html(&text);
+                                                            app.song = Some(song);
+                                                            let chord_count = app.song.as_ref().unwrap().chords.len();
+                                                            let title = app.song.as_ref().unwrap().title.as_ref().unwrap_or(&"Unknown".to_string());
+                                                            let artist = app.song.as_ref().unwrap().artist.as_ref().unwrap_or(&"Unknown".to_string());
+                                                            app.message = format!("Saved to fetched.html. Parsed {} chords for '{}' by {}", chord_count, title, artist);
                                                         } else {
                                                             app.message = "Error writing to file".to_string();
                                                         }
